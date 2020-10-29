@@ -62,8 +62,8 @@ class KnowRob(object):
         self.prolog = Prolog()
         self.print_with_prefix('knowrob showed up')
         self.query_lock = Lock()
-        rospy.wait_for_service('/object_state_publisher/update_object_positions')
-        self.reset_object_state_publisher = rospy.ServiceProxy('/object_state_publisher/update_object_positions',
+        rospy.wait_for_service('/visualization_marker_array')
+        self.reset_object_state_publisher = rospy.ServiceProxy('/visualization_marker_array',
                                                                Trigger)
         self.shelf_layer_from_facing = {}
         self.shelf_system_from_layer = {}
@@ -92,7 +92,7 @@ class KnowRob(object):
         :return: PoseStamped in a form the knowrob likes
         :rtype: str
         """
-        return '[\'{}\', _, [{},{},{}], [{},{},{},{}]]'.format(pose_stamped.header.frame_id,
+        return '[\'{}\', [{},{},{}], [{},{},{},{}]]'.format(pose_stamped.header.frame_id,
                                                                pose_stamped.pose.position.x,
                                                                pose_stamped.pose.position.y,
                                                                pose_stamped.pose.position.z,
@@ -161,19 +161,19 @@ class KnowRob(object):
             raise Exception('Could not identify number of tiles for shelf {}.'.format(shelf_system_id))
 
     def is_5tile_system(self, shelf_system_id):
-        q = 'rdfs_individual_of(\'{}\', {})'.format(shelf_system_id, SHELF_T5)
+        q = 'instance_of(\'{}\', {})'.format(shelf_system_id, SHELF_T5)
         return self.once(q) == {}
 
     def is_heavy_system(self, shelf_system_id):
-        q = 'rdfs_individual_of(\'{}\', {})'.format(shelf_system_id, SHELF_H)
+        q = 'instance_of(\'{}\', {})'.format(shelf_system_id, SHELF_H)
         return self.once(q) == {}
 
     def is_6tile_system(self, shelf_system_id):
-        q = 'rdfs_individual_of(\'{}\', {})'.format(shelf_system_id, SHELF_T6)
+        q = 'instance_of(\'{}\', {})'.format(shelf_system_id, SHELF_T6)
         return self.once(q) == {}
 
     def is_7tile_system(self, shelf_system_id):
-        q = 'rdfs_individual_of(\'{}\', {})'.format(shelf_system_id, SHELF_T7)
+        q = 'instance_of(\'{}\', {})'.format(shelf_system_id, SHELF_T7)
         return self.once(q) == {}
 
     def get_bottom_layer_type(self, shelf_system_id):
@@ -190,9 +190,9 @@ class KnowRob(object):
         :return: returns dict mapping floor id to pose ordered from lowest to highest
         :rtype: dict
         """
-        q = 'rdf_has(\'{}\', knowrob:properPhysicalParts, Floor), ' \
-            'rdfs_individual_of(Floor, {}), ' \
-            'object_feature(Floor, Feature, dmshop:\'DMShelfPerceptionFeature\'),' \
+        q = 'triple(\'{}\', dul:hasComponent, Floor), ' \
+            'instance_of(Floor, {}), ' \
+            'object_feature_type(Floor, Feature, dmshop:\'DMShelfPerceptionFeature\'),' \
             'object_frame_name(Feature, FeatureFrame).'.format(shelf_system_id, SHELF_FLOOR)
 
         solutions = self.all_solutions(q)
@@ -218,11 +218,7 @@ class KnowRob(object):
         :param object_class:
         :return: [x length/depth, y length/width, z length/height]
         """
-        q = 'owl_class_properties(\'{}\',knowrob:depthOfObject, literal(type(_,X))), atom_number(X,X_num),' \
-            'owl_class_properties(\'{}\',knowrob:widthOfObject, literal(type(_,Y))), atom_number(Y,Y_num),' \
-            'owl_class_properties(\'{}\',knowrob:heightOfObject, literal(type(_,Z))), atom_number(Z,Z_num).'.format(object_class,
-                                                                                                                    object_class,
-                                                                                                                    object_class)
+        q = 'object_dimensions(\'{}\', X_num, Y_num, Z_num).'.format(object_class)
         solutions = self.once(q)
         if solutions:
             return [solutions['Y_num'], solutions['X_num'], solutions['Z_num']]
@@ -234,7 +230,7 @@ class KnowRob(object):
         :rtype: OrderedDict
         """
         shelf_system_id = self.get_shelf_system_from_layer(shelf_layer_id)
-        q = 'findall([F, P], (shelf_facing(\'{}\', F),current_object_pose(F, P)), Fs).'.format(shelf_layer_id)
+        q = 'findall([F, P], (shelf_facing(\'{}\', F),is_at(F, P)), Fs).'.format(shelf_layer_id)
         solutions = self.all_solutions(q)[0]
         facings = []
         for facing_id, pose in solutions['Fs']:
@@ -253,7 +249,8 @@ class KnowRob(object):
         :return: KnowRob IDs of the labels on the shelf layer.
         :rtype: list
         """
-        q = 'findall([L, X], (rdf_has(\'{}\', knowrob:properPhysicalParts, L), rdfs_individual_of(L, dmshop:\'DMShelfLabel\'), belief_at_relative_to(L, \'{}\', [_,_,[X,_,_],_])), Ls).'.format(layer_id, layer_id)
+        q = 'findall([L, X], (triple(\'{}\', dul:hasComponent, L), instance_of(L, dmshop:\'DMShelfLabel\'), is_at(L, [\'{}\' ,[X,_,_], _])), Ls).'.format(
+            layer_id, layer_id)
         solutions = self.all_solutions(q)[0]
         sorted_solutions = list(sorted(solutions['Ls'], key=lambda x: x[1]))
         return [solution[0] for solution in sorted_solutions]
@@ -266,7 +263,7 @@ class KnowRob(object):
         :return: DAN of the label.
         :rtype: str
         """
-        q = 'rdf_has(\'{}\', shop:articleNumberOfLabel, _AN), rdf_has_prolog(_AN, shop:dan, DAN).'.format(label_id)
+        q = 'triple(\'{}\', shop:articleNumberOfLabel, _AN), triple(_AN, shop:dan, DAN).'.format(label_id)
         solution = self.once(q)
         return solution['DAN'][1:-1]
 
@@ -278,7 +275,8 @@ class KnowRob(object):
         :return: 1-D position of the label, relative to the left edge of its shelf layer (in m).
         :rtype: float
         """
-        q = 'rdf_has(_Layer, knowrob:properPhysicalParts, \'{}\'), rdfs_individual_of(_Layer, shop:\'ShelfLayer\'), belief_at_relative_to(\'{}\', _Layer, [_,_,[Pos,_,_],_]), object_dimensions(_Layer, _, Width, _).'.format(label_id, label_id)
+        q = 'triple(_Layer, dul:hasComponent, \'{}\'), instance_of(_Layer, shop:\'ShelfLayer\'), is_at(\'{}\', [_Layer,[Pos,_,_],_]), object_dimensions(_Layer, _, Width, _).'.format(
+            label_id, label_id)
         solution = self.once(q)
         return solution['Pos'] + solution['Width'] / 2.0
 
@@ -325,28 +323,28 @@ class KnowRob(object):
         return len(self.all_solutions(q)) != 0
 
     def get_facing_depth(self, facing_id):
-        q = 'comp_facingDepth(\'{}\', literal(type(_, W_XSD))),atom_number(W_XSD,W)'.format(facing_id)
+        q = 'comp_facingDepth(\'{}\', W_XSD),atom_number(W_XSD,W)'.format(facing_id)
         solutions = self.once(q)
         if solutions:
             return solutions['W']
         raise Exception('can\'t compute facing depth')
 
     def get_facing_separator(self, facing_id):
-        q = 'rdf_has(\'{}\', shop:leftSeparator, L), rdf_has(\'{}\', shop:rightSeparator, R)'.format(facing_id,
+        q = 'triple(\'{}\', shop:leftSeparator, L), triple(\'{}\', shop:rightSeparator, R)'.format(facing_id,
                                                                                                         facing_id)
         solutions = self.once(q)
         if solutions:
             return solutions['L'].replace('\'', ''), solutions['R'].replace('\'', '')
 
     def get_facing_height(self, facing_id):
-        q = 'comp_facingHeight(\'{}\', literal(type(_, W_XSD))),atom_number(W_XSD,W)'.format(facing_id)
+        q = 'comp_facingHeight(\'{}\',W_XSD),atom_number(W_XSD,W)'.format(facing_id)
         solutions = self.once(q)
         if solutions:
             return solutions['W']
         raise Exception('can\' compute facing height')
 
     def get_facing_width(self, facing_id):
-        q = 'comp_facingWidth(\'{}\', literal(type(_, W_XSD))),atom_number(W_XSD,W)'.format(facing_id)
+        q = 'comp_facingWidth(\'{}\', W_XSD),atom_number(W_XSD,W)'.format(facing_id)
         solutions = self.once(q)
         if solutions:
             return solutions['W']
@@ -357,7 +355,7 @@ class KnowRob(object):
         :type id: str
         :type pose: PoseStamped
         """
-        q = 'belief_at_update(\'{}\', {})'.format(id, self.pose_to_prolog(pose))
+        q = 'is_at(\'{}\', {})'.format(id, self.pose_to_prolog(pose))
         return self.once(q)
 
     # def get_objects(self, object_type):
@@ -368,7 +366,7 @@ class KnowRob(object):
     #     :rtype: dict
     #     """
     #     objects = OrderedDict()
-    #     q = 'rdfs_individual_of(R, {}).'.format(object_type)
+    #     q = 'instance_of(R, {}).'.format(object_type)
     #     solutions = self.all_solutions(q)
     #     for solution in solutions:
     #         object_id = solution['R'].replace('\'', '')
@@ -382,7 +380,7 @@ class KnowRob(object):
     #     return objects
 
     def get_all_individuals_of(self, object_type):
-        q = ' findall(R, rdfs_individual_of(R, {}), Rs).'.format(object_type)
+        q = ' findall(R, instance_of(R, {}), Rs).'.format(object_type)
         solutions = self.once(q)['Rs']
         return [self.remove_quotes(solution) for solution in solutions]
 
@@ -406,7 +404,8 @@ class KnowRob(object):
         """
         if object_id not in self.perceived_frame_id_map:
             q = 'object_feature(\'{}\', Feature, dmshop:\'DMShelfPerceptionFeature\'),' \
-                'object_frame_name(Feature,FeatureFrame).'.format(object_id)
+                'holds(Feature, knowrob:frameName, FeatureFrame).'.format(
+                    object_id)
             self.perceived_frame_id_map[object_id] = self.once(q)['FeatureFrame'].replace('\'', '')
         return self.perceived_frame_id_map[object_id]
 
@@ -416,7 +415,7 @@ class KnowRob(object):
         :return: frame_id of the center of mesh.
         :rtype: str
         """
-        q = 'object_frame_name(\'{}\', R).'.format(object_id)
+        q = 'holds(\'{}\', knowrob:frameName, R).'.format(object_id)
         return self.once(q)['R'].replace('\'', '')
 
     # floor
@@ -457,7 +456,7 @@ class KnowRob(object):
             new_floor_height = np.mean(separator_zs)
             current_floor_pose = lookup_pose(MAP, self.get_object_frame_id(shelf_layer_id))
             current_floor_pose.pose.position.z += new_floor_height - old_p.pose.position.z
-            q = 'belief_at_update(\'{}\', {})'.format(shelf_layer_id, self.pose_to_prolog(current_floor_pose))
+            q = 'is_at(\'{}\', {})'.format(shelf_layer_id, self.pose_to_prolog(current_floor_pose))
             self.once(q)
 
     def add_separators(self, shelf_layer_id, separators):
@@ -520,9 +519,9 @@ class KnowRob(object):
         q = 'shelf_facings_mark_dirty(\'{}\')'.format(shelf_layer_id)
         self.once(q)
 
-    def assert_confidence(self, facing_id, confidence):
-        q = 'rdf_assert(\'{}\', knowrob:confidence, literal(type(xsd:double, \'{}\')), belief_state).'.format(facing_id, confidence)
-        self.once(q)
+    # def assert_confidence(self, facing_id, confidence):
+    #     q = 'tell(holds(\'{}\', knowrob:confidence, \'{}\')).'.format(facing_id, confidence)
+    #     self.once(q)
 
     def does_DAN_exist(self, dan):
         q = 'article_number_of_dan(\'{}\', _)'.format(dan)
@@ -533,7 +532,7 @@ class KnowRob(object):
         :return: list of str
         :rtype: list
         """
-        q = 'findall(DAN, rdf_has(AN, shop:dan, literal(type(_, DAN))), DANS).'
+        q = 'findall(DAN, triple(AN, shop:dan, DAN), DANS).'
         dans = self.once(q)['DANS']
         return dans
 
@@ -547,14 +546,14 @@ class KnowRob(object):
             q = 'product_spawn_front_to_back(\'{}\', ObjId)'.format(facing_id)
             self.once(q)
 
-    def save_beliefstate(self, path=None):
+    def save_beliefstate(self, path=None):  ### beleifstate.owl might not be created. the data is stored in tripledb
         """
         :type path: str
         """
         # pass
         if path is None:
             path = '{}/data/beliefstate.owl'.format(RosPack().get_path('refills_second_review'))
-        q = 'mem_export(\'{}\')'.format(path)
+        q = 'memorize(\'{}\')'.format(path)
         self.once(q)
 
     def get_shelf_layer_width(self, shelf_layer_id):
@@ -591,14 +590,14 @@ class KnowRob(object):
         return height
 
     def get_all_empty_facings(self):
-        q = 'findall(Facing, (entity(Facing, [a,location,[type,shop:product_facing]]),\+holds(shop:productInFacing(Facing,_))),Fs)'
+        q = 'findall(Facing, (has_type(Facing, shop:\'ProductFacingStanding\'),\+holds(Facing, shop:productInFacing,_)),Fs)'
         solution = self.once(q)
         if solution:
             return solution['Fs']
         return []
 
     def get_empty_facings_from_layer(self, shelf_layer_id):
-        q = 'findall(F, (shelf_facing(\'{}\', F), \+holds(shop:productInFacing(F,_))),Fs)'.format(shelf_layer_id)
+        q = 'findall(F, (shelf_facing(\'{}\', F), \+holds(F, shop:productInFacing, _)),Fs)'.format(shelf_layer_id)
         solution = self.once(q)
         if solution:
             return solution['Fs']
@@ -651,7 +650,7 @@ class KnowRob(object):
         :return: shelf layer above or None if it does not exist.
         :rtype: str
         """
-        q = 'rdfs_individual_of(\'{}\', {})'.format(shelf_layer_id, SHELF_BOTTOM_LAYER)
+        q = 'instance_of(\'{}\', {})'.format(shelf_layer_id, SHELF_BOTTOM_LAYER)
         return self.once(q) != []
 
     def clear_beliefstate(self, initial_beliefstate=None):
@@ -661,7 +660,10 @@ class KnowRob(object):
         #put path of owl here
         if initial_beliefstate is None:
             initial_beliefstate = self.initial_beliefstate
-        q = 'retractall(owl_parser:owl_file_loaded(\'{}/beliefstate.owl\'))'.format(initial_beliefstate)
+        # q = 'retractall(owl_parser:owl_file_loaded(\'{}/beliefstate.owl\'))'.format(initial_beliefstate)
+        # Works only if the beliefstate.owl is loaded with namespace beliefstate
+        q = 'tripledb:tripledb_graph_drop(' + \
+            'beliefstate)'.format(initial_beliefstate)
         result = self.once(q) != []
         self.reset_object_state_publisher.call(TriggerRequest())
         return result
@@ -690,33 +692,35 @@ class KnowRob(object):
         :type path: str
         :rtype: bool
         """
-        q = 'mem_import(\'{}\')'.format(path)
+        q = 'tripledb_load(\'{}\')'.format(path+"/beliefstate.owl")
         return self.once(q) != []
 
-    def start_episode(self, path_to_old_episode=None):
-        q = 'knowrob_memory:current_episode(Y)'
-        result = self.once(q)
-        if result:
-            q = 'knowrob_memory:current_episode(E), mem_episode_stop(E)'
-            self.once(q)
+    ### NEEM logging ?
+   
+    # def start_episode(self, path_to_old_episode=None):
+    #     q = 'knowrob_memory:current_episode(Y)'
+    #     result = self.once(q)
+    #     if result:
+    #         q = 'knowrob_memory:current_episode(E), mem_episode_stop(E)'
+    #         self.once(q)
 
-        if path_to_old_episode is None:
-            q = 'mem_episode_start(E).'
-            result = self.once(q)
-            self.episode_id = result['E']
-        else:
-            q = 'mem_episode_start(E, [import:\'{}\']).'.format(path_to_old_episode)
-            result = self.once(q)
-            self.episode_id = result['E']
-        return result != []
+    #     if path_to_old_episode is None:
+    #         q = 'mem_episode_start(E).'
+    #         result = self.once(q)
+    #         self.episode_id = result['E']
+    #     else:
+    #         q = 'mem_episode_start(E, [import:\'{}\']).'.format(path_to_old_episode)
+    #         result = self.once(q)
+    #         self.episode_id = result['E']
+    #     return result != []
 
-    def stop_episode(self):
-        #import os
-        #print(os.getcwd())
-        #os.system('mongodump --db roslog --out .')
+    # def stop_episode(self):
+    #     #import os
+    #     #print(os.getcwd())
+    #     #os.system('mongodump --db roslog --out .')
 
-        q = 'mem_episode_stop(\'{}\').'.format(self.episode_id)
-        return self.once(q) != []
+    #     q = 'mem_episode_stop(\'{}\').'.format(self.episode_id)
+    #     return self.once(q) != []
 
     def start_tf_logging(self):
         q = 'ros_logger_start([[\'tf\',[]]])'
