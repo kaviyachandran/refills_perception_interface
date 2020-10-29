@@ -92,7 +92,7 @@ class KnowRob(object):
         :return: PoseStamped in a form the knowrob likes
         :rtype: str
         """
-        return '[\'{}\', [{},{},{}], [{},{},{},{}]]'.format(pose_stamped.header.frame_id,
+        return '[_, [\'{}\', [{},{},{}], [{},{},{},{}]]]'.format(pose_stamped.header.frame_id,
                                                                pose_stamped.pose.position.x,
                                                                pose_stamped.pose.position.y,
                                                                pose_stamped.pose.position.z,
